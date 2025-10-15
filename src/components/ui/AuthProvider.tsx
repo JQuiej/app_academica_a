@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import type { SupabaseClient, User as SupabaseUser } from '@supabase/supabase-js';
 
-// Define una interfaz más completa para tu usuario
+// Interfaz para nuestro usuario combinado (auth + perfil de la tabla 'users')
 interface User extends SupabaseUser {
   full_name: string | null;
   avatar_url: string | null;
@@ -38,6 +38,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
+        // Si hay una sesión de Supabase, procedemos a buscar el perfil en nuestra tabla 'users'
         if (session?.user) {
           const { data: profile } = await supabase
             .from('users')
@@ -45,10 +46,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             .eq('id', session.user.id)
             .single();
 
+          // Combinamos la información de la sesión (auth.users) con nuestro perfil (public.users)
           setUser({ ...session.user, ...profile } as User);
         } else {
+          // Si no hay sesión, el usuario es nulo
           setUser(null);
         }
+        // Marcamos la carga como finalizada solo después de haber intentado obtener la sesión y el perfil
         setLoading(false);
       }
     );
@@ -57,9 +61,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       subscription.unsubscribe();
     };
   }, [supabase, router]);
-  
+
   const signOut = async () => {
     await supabase.auth.signOut();
+    // router.refresh() le indica a Next.js que recargue la vista desde el servidor.
+    // El middleware se encargará de redirigir a /login al no encontrar una sesión.
     router.refresh();
   };
 
@@ -70,5 +76,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     supabase,
   };
 
+  // ✅ CORRECCIÓN IMPORTANTE: Devolvemos {children} directamente.
+  // No bloqueamos el renderizado. Los componentes hijos usarán el estado 'loading'
+  // para decidir si muestran un esqueleto de carga o los datos.
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

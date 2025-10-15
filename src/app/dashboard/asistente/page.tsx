@@ -1,4 +1,3 @@
-// app/dashboard/asistente/page.tsx
 'use client'
 
 import { useState, useRef, useEffect } from 'react'
@@ -6,13 +5,19 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { sendMessageToAssistant, generarResumen, generarCuestionario, generarFlashcards, Message } from '@/app/_actions/asistente'
 import { Send, Paperclip, Download, Loader2, FileText, Brain, Sparkles, X } from 'lucide-react'
 import { toast } from 'sonner'
 import ReactMarkdown from 'react-markdown'
+import jsPDF from 'jspdf'
+import 'jspdf-autotable'
+
+// Extiende la interfaz jsPDF para incluir autoTable
+interface jsPDFWithAutoTable extends jsPDF {
+  autoTable: (options: any) => jsPDF;
+}
 
 export default function AsistentePage() {
   const [messages, setMessages] = useState<Message[]>([])
@@ -22,7 +27,6 @@ export default function AsistentePage() {
   const [filePreview, setFilePreview] = useState<string>('')
   const [fileText, setFileText] = useState<string>('')
   
-  // Estados para generación de contenido
   const [generatedContent, setGeneratedContent] = useState<string>('')
   const [isGenerating, setIsGenerating] = useState(false)
   const [numeroPreguntas, setNumeroPreguntas] = useState(10)
@@ -42,7 +46,6 @@ export default function AsistentePage() {
   const extractTextFromFile = async (file: File): Promise<string> => {
     const fileType = file.type
 
-    // Si es texto plano
     if (fileType === 'text/plain' || file.name.endsWith('.txt') || file.name.endsWith('.md')) {
       return new Promise((resolve, reject) => {
         const reader = new FileReader()
@@ -52,39 +55,29 @@ export default function AsistentePage() {
       })
     }
 
-    // Si es PDF
+    // ✅ CORRECCIÓN: Procesamiento de PDF movido al servidor
     if (fileType === 'application/pdf') {
-      return new Promise(async (resolve, reject) => {
-        try {
-          const arrayBuffer = await file.arrayBuffer()
-          const pdfjsLib = await import('pdfjs-dist')
-          
-          // Configurar worker
-          pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`
-          
-          const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise
-          let fullText = ''
-          
-          for (let i = 1; i <= pdf.numPages; i++) {
-            const page = await pdf.getPage(i)
-            const textContent = await page.getTextContent()
-            const pageText = textContent.items.map((item: any) => item.str).join(' ')
-            fullText += pageText + '\n\n'
-          }
-          
-          resolve(fullText)
-        } catch (error) {
-          reject(error)
-        }
-      })
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const response = await fetch('/api/extract-text', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to extract text from PDF on the server.');
+      }
+
+      const data = await response.json();
+      return data.text;
     }
 
-    // Si es imagen (OCR con Tesseract)
     if (fileType.startsWith('image/')) {
       return new Promise(async (resolve, reject) => {
         try {
           const { createWorker } = await import('tesseract.js')
-          const worker = await createWorker('spa') // Español
+          const worker = await createWorker('spa')
           
           const { data: { text } } = await worker.recognize(file)
           await worker.terminate()
@@ -99,17 +92,59 @@ export default function AsistentePage() {
     throw new Error('Tipo de archivo no soportado')
   }
 
+  // ✅ CORRECCIÓN: Función de descarga a PDF
+  const handleDownload = () => {
+    if (!generatedContent) return;
+
+    const doc = new jsPDF() as jsPDFWithAutoTable;
+    const margin = 15;
+    let y = margin;
+
+    const addText = (text: string, options: { size?: number, style?: 'bold' | 'normal', isTitle?: boolean }) => {
+        const { size = 12, style = 'normal', isTitle = false } = options;
+        const splitText = doc.splitTextToSize(text, doc.internal.pageSize.width - margin * 2);
+
+        if (y + (splitText.length * (size / 2)) > doc.internal.pageSize.height - margin) {
+            doc.addPage();
+            y = margin;
+        }
+
+        doc.setFontSize(size);
+        doc.setFont('helvetica', style);
+        doc.text(splitText, margin, y);
+        y += isTitle ? 12 : (splitText.length * (size / 2.5)) + 4;
+    };
+    
+    generatedContent.split('\n').forEach(line => {
+        if (line.startsWith('## ')) {
+            addText(line.substring(3), { size: 16, style: 'bold', isTitle: true });
+        } else if (line.startsWith('# ')) {
+            addText(line.substring(2), { size: 20, style: 'bold', isTitle: true });
+        } else if (line.match(/^(\*|\-)\s/)) {
+            const bulletText = '• ' + line.replace(/^(\*|\-)\s/, '');
+            addText(bulletText, {});
+        } else if (line.trim() !== '') {
+            addText(line, {});
+        } else {
+            y += 5; // Espacio para líneas en blanco
+        }
+    });
+
+    doc.save(`contenido-generado-${Date.now()}.pdf`);
+    toast.success('Contenido descargado como PDF');
+};
+
+
+  // ... (El resto de tus funciones como handleFileSelect, handleSendMessage, etc. se mantienen igual)
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
 
-    // Validar tamaño (max 10MB)
     if (file.size > 10 * 1024 * 1024) {
       toast.error('El archivo es muy grande. Máximo 10MB.')
       return
     }
 
-    // Validar tipo
     const allowedTypes = [
       'text/plain', 
       'text/markdown', 
@@ -195,13 +230,10 @@ export default function AsistentePage() {
       return
     }
 
-    // Verificar que hay texto
     if (fileText.trim().length === 0) {
       toast.error('El archivo está vacío o no se pudo extraer texto')
       return
     }
-
-    console.log('📝 Contenido a enviar (primeros 200 chars):', fileText.substring(0, 200))
 
     setIsGenerating(true)
     setGeneratedContent('')
@@ -230,19 +262,6 @@ export default function AsistentePage() {
     } finally {
       setIsGenerating(false)
     }
-  }
-
-  const handleDownload = () => {
-    if (!generatedContent) return
-
-    const blob = new Blob([generatedContent], { type: 'text/markdown' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `contenido-generado-${Date.now()}.md`
-    a.click()
-    URL.revokeObjectURL(url)
-    toast.success('Contenido descargado')
   }
 
   return (
