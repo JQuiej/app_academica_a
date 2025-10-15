@@ -1,11 +1,11 @@
-// app/register/page.tsx
 'use client';
 
 import { useState } from 'react';
-import { createClient } from '@/lib/supabase/client'; // <-- 1. CORRECCIÓN
+import { createClient } from '@/lib/supabase/client';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import GoogleAuthButton from '../../components/ui/GoogleAuthButton';
+import { toast } from 'sonner';
 
 export default function RegisterPage() {
   const [email, setEmail] = useState('');
@@ -16,63 +16,47 @@ export default function RegisterPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const router = useRouter();
-  const supabase = createClient(); // <-- 2. CORRECCIÓN
+  const supabase = createClient();
 
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError(null);
 
-    // Validations
     if (password !== confirmPassword) {
       setError('Las contraseñas no coinciden');
       setLoading(false);
       return;
     }
-
     if (password.length < 6) {
       setError('La contraseña debe tener al menos 6 caracteres');
       setLoading(false);
       return;
     }
 
-    try {
-      // Register with Supabase Auth
-      const { data: authData, error: authError } = await supabase.auth.signUp({
-        email,
-        password,
-        options: {
-          data: {
-            full_name: fullName,
-          },
+    // ✅ CORRECCIÓN: Ahora solo necesitamos registrar al usuario.
+    // El trigger en la base de datos se encargará de crear el perfil en la tabla 'users'.
+    const { error: authError } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        data: {
+          full_name: fullName,
+          // Se envía el rol para que el trigger lo pueda usar
+          role: role,
         },
-      });
+      },
+    });
 
-      if (authError) throw authError;
+    setLoading(false);
 
-      // Create user in our users table
-      if (authData.user) {
-        const { error: dbError } = await supabase
-          .from('users')
-          .insert({
-            id: authData.user.id, 
-            email,
-            password_hash: 'hashed_by_supabase',
-            full_name: fullName,
-            role,
-            provider: 'email',
-            provider_id: authData.user.id,
-          });
-
-        if (dbError) throw dbError;
-
-        router.push('/dashboard');
-        router.refresh();
-      }
-    } catch (error: any) {
-      setError(error.message);
-    } finally {
-      setLoading(false);
+    if (authError) {
+      setError(authError.message);
+      toast.error("Error en el registro", { description: authError.message });
+    } else {
+      // El registro fue exitoso. Avisamos al usuario y el middleware se encargará de la redirección.
+      toast.success("¡Registro exitoso! Revisa tu correo para confirmar tu cuenta.");
+      router.refresh();
     }
   };
 
@@ -80,7 +64,6 @@ export default function RegisterPage() {
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100 px-4 py-8">
       <div className="max-w-md w-full space-y-8">
         <div className="bg-white rounded-2xl shadow-xl p-8">
-          {/* Header */}
           <div className="text-center mb-8">
             <h2 className="text-3xl font-bold text-gray-900">
               Crear Cuenta
@@ -90,12 +73,10 @@ export default function RegisterPage() {
             </p>
           </div>
 
-          {/* Google Register */}
           <div className="mb-6">
             <GoogleAuthButton />
           </div>
 
-          {/* Divider */}
           <div className="relative mb-6">
             <div className="absolute inset-0 flex items-center">
               <div className="w-full border-t border-gray-300"></div>
@@ -107,14 +88,12 @@ export default function RegisterPage() {
             </div>
           </div>
 
-          {/* Error Message */}
           {error && (
             <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg">
               <p className="text-sm text-red-600">{error}</p>
             </div>
           )}
 
-          {/* Register Form */}
           <form onSubmit={handleRegister} className="space-y-4">
             <div>
               <label htmlFor="fullName" className="block text-sm font-medium text-gray-700 mb-1">
@@ -145,7 +124,7 @@ export default function RegisterPage() {
                 placeholder="tu@email.com"
               />
             </div>
-
+            
             <div>
               <label htmlFor="role" className="block text-sm font-medium text-gray-700 mb-1">
                 Tipo de Cuenta
@@ -204,7 +183,6 @@ export default function RegisterPage() {
             </button>
           </form>
 
-          {/* Footer */}
           <div className="mt-6 text-center">
             <p className="text-sm text-gray-600">
               ¿Ya tienes cuenta?{' '}
@@ -215,7 +193,6 @@ export default function RegisterPage() {
           </div>
         </div>
 
-        {/* Additional Info */}
         <p className="text-center text-xs text-gray-500">
           Al registrarte, aceptas nuestros términos de servicio y política de privacidad
         </p>
