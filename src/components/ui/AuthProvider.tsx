@@ -57,9 +57,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       subscription.unsubscribe();
     };
   }, [supabase, router]);
-
-  // ✅ CORRECCIÓN: Se cambia router.push por router.refresh()
-  // Esto le pide al servidor que se recargue. El middleware se encargará de la redirección.
+  
   const signOut = async () => {
     await supabase.auth.signOut();
     router.refresh();

@@ -9,7 +9,7 @@ export async function GET(request: Request) {
   if (code) {
     const supabase = createClient();
     // Intercambia el código por una sesión
-    const { data: { session }, error: sessionError } = await (await supabase).auth.exchangeCodeForSession(code);
+    const { data: { session }, error: sessionError } = await supabase.auth.exchangeCodeForSession(code);
 
     if (sessionError) {
       console.error('Error exchanging code for session:', sessionError.message);
@@ -19,7 +19,7 @@ export async function GET(request: Request) {
     // Si la sesión se obtiene correctamente, procedemos a verificar/crear el perfil
     if (session?.user) {
       // 1. Verificamos si el usuario ya existe en nuestra tabla 'public.users'
-      const { data: existingUser } = await (await supabase)
+      const { data: existingUser } = await supabase
         .from('users')
         .select('id')
         .eq('id', session.user.id) // Buscamos por el ID de la sesión
@@ -27,10 +27,10 @@ export async function GET(request: Request) {
 
       // 2. Si no existe, lo creamos
       if (!existingUser) {
-        const { error: insertError } = await (await supabase)
+        const { error: insertError } = await supabase
           .from('users')
           .insert({
-            id: session.user.id, // <-- Se usa el ID de la sesión para mantener consistencia
+            id: session.user.id,
             email: session.user.email!,
             full_name: session.user.user_metadata.full_name || session.user.user_metadata.name,
             avatar_url: session.user.user_metadata.avatar_url || session.user.user_metadata.picture,
@@ -40,8 +40,6 @@ export async function GET(request: Request) {
         
         if (insertError) {
             console.error('Error creating user profile in public.users:', insertError.message);
-            // Aunque falle la creación del perfil, la sesión es válida.
-            // Podríamos redirigir a una página de error de perfil, pero por ahora lo dejamos pasar.
         }
       }
     }
