@@ -1,9 +1,10 @@
 import { createClient } from "../../../lib/supabase/server";
 import { PredictorClient } from "./PredictorClient";
 
+// ⬅️ IMPORTANTE: Forzar revalidación dinámica
 export const dynamic = "force-dynamic";
+export const revalidate = 0; // No cachear esta página
 
-// Esta función para procesar los datos es correcta, no necesita cambios.
 function procesarDatosParaPredictor(materias: any[], evaluaciones: any[], calificaciones: any[]) {
   const calificacionesMap = new Map(calificaciones.map(c => [c.evaluacion_id, c.score]));
   const evaluacionesPorMateria = new Map<string, any[]>();
@@ -44,15 +45,12 @@ function procesarDatosParaPredictor(materias: any[], evaluaciones: any[], califi
   });
 }
 
-// 1. Corregimos la firma de la función para que reciba searchParams como una Promesa
 export default async function PredictorPage({
   searchParams,
 }: {
-  searchParams: Promise<{ cicloId?: string }>; 
+  searchParams: Promise<{ cicloId?: string }>;
 }) {
-  const supabase = createClient();
-
-  // 2. Usamos 'await' para obtener los parámetros de la promesa
+  const supabase = await createClient();
   const resolvedSearchParams = await searchParams;
 
   const { data: { user } } = await supabase.auth.getUser();
@@ -65,14 +63,14 @@ export default async function PredictorPage({
     );
   }
   
-  // 3. Usamos el objeto de parámetros resuelto
   let cicloIdActivo = resolvedSearchParams?.cicloId;
 
+  // Si no hay ciclo en la URL, buscar el más reciente
   if (!cicloIdActivo) {
     const { data: cicloReciente } = await supabase
       .from("ciclos")
       .select("id")
-      .eq("user_id", user.id) // <-- Filtro de seguridad
+      .eq("user_id", user.id)
       .order("year", { ascending: false })
       .order("period", { ascending: false })
       .limit(1)
@@ -89,11 +87,13 @@ export default async function PredictorPage({
     );
   }
 
+  // ⬅️ CAMBIO IMPORTANTE: Obtener materias filtradas por ciclo Y usuario
   const { data: materiasData } = await supabase
     .from("materias")
     .select("*")
     .eq("ciclo_id", cicloIdActivo)
-    .eq("user_id", user.id); 
+    .eq("user_id", user.id)
+    .order("name"); // Ordenar por nombre para mejor UX
 
   if (!materiasData || materiasData.length === 0) {
     return <PredictorClient materias={[]} />;
@@ -101,10 +101,24 @@ export default async function PredictorPage({
 
   const materiaIds = materiasData.map((m: any) => m.id);
 
-  const { data: evaluacionesData } = await supabase.from("evaluaciones").select("*").in("materia_id", materiaIds);
-  const { data: calificacionesData } = await supabase.from("calificaciones").select("*");
+  const { data: evaluacionesData } = await supabase
+    .from("evaluaciones")
+    .select("*")
+    .in("materia_id", materiaIds)
+    .order("date");
 
-  const materias = procesarDatosParaPredictor(materiasData, evaluacionesData || [], calificacionesData || []);
+  const evaluacionIds = evaluacionesData?.map(e => e.id) || [];
+
+  const { data: calificacionesData } = await supabase
+    .from("calificaciones")
+    .select("*")
+    .in("evaluacion_id", evaluacionIds);
+
+  const materias = procesarDatosParaPredictor(
+    materiasData, 
+    evaluacionesData || [], 
+    calificacionesData || []
+  );
 
   return <PredictorClient materias={materias} />;
 }

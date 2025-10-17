@@ -1,40 +1,72 @@
+// ⬅️ IMPORTANTE: Agregar estas directivas al inicio
 export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 import { createClient } from "@/lib/supabase/server";
 import { EstadisticasClient, type Estadistica } from "./EstadisticasClient";
 
-export default async function EstadisticasPage() {
-  const supabase = createClient();
-  const { data: { user } } = await (await supabase).auth.getUser();
+export default async function EstadisticasPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ cicloId?: string }>;
+}) {
+  const supabase = await createClient();
+  const resolvedSearchParams = await searchParams;
+  
+  const { data: { user } } = await supabase.auth.getUser();
 
   if (!user) {
     return <div className="p-8">Necesitas iniciar sesión.</div>;
   }
-  // 1. Materias
-  const { data: materias } = await (await supabase)
+
+  let cicloIdActivo = resolvedSearchParams?.cicloId;
+
+  // Si no hay ciclo, buscar el más reciente
+  if (!cicloIdActivo) {
+    const { data: cicloReciente } = await supabase
+      .from("ciclos")
+      .select("id")
+      .eq("user_id", user.id)
+      .order("year", { ascending: false })
+      .order("period", { ascending: false })
+      .limit(1)
+      .single();
+
+    cicloIdActivo = cicloReciente?.id;
+  }
+
+  if (!cicloIdActivo) {
+    return <EstadisticasClient estadisticas={[]} />;
+  }
+
+  // 1. Materias filtradas por ciclo Y usuario
+  const { data: materias } = await supabase
     .from("materias")
     .select("id, name")
-    .eq("user_id", user.id); // <-- ¡FILTRO PRINCIPAL!
+    .eq("user_id", user.id)
+    .eq("ciclo_id", cicloIdActivo) // ⬅️ Filtro por ciclo
+    .order("name");
 
-if (!materias || materias.length === 0) {
+  if (!materias || materias.length === 0) {
     return <EstadisticasClient estadisticas={[]} />;
   }
 
   const materiaIds = materias.map((m) => m.id);
 
   // 2. Evaluaciones
-  const { data: evaluaciones } = await (await supabase)
+  const { data: evaluaciones } = await supabase
     .from("evaluaciones")
     .select("id, type, punteo, materia_id")
-    .in("materia_id", materiaIds);
+    .in("materia_id", materiaIds)
+    .order("date");
 
   const evaluacionIds = evaluaciones?.map(e => e.id) || [];
 
   // 3. Calificaciones
-  const { data: calificaciones } = await (await supabase)
+  const { data: calificaciones } = await supabase
     .from("calificaciones")
     .select("evaluacion_id, score")
     .in("evaluacion_id", evaluacionIds);
-
 
   // 4. Procesar estadísticas
   const estadisticas =

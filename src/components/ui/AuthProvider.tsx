@@ -1,7 +1,7 @@
 'use client';
 
 import { createClient } from '@/lib/supabase/client';
-import { useRouter } from 'next/navigation';
+import { useRouter, usePathname } from 'next/navigation';
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import type { SupabaseClient, User as SupabaseUser } from '@supabase/supabase-js';
 
@@ -17,6 +17,7 @@ interface AuthContextType {
   loading: boolean;
   signOut: () => Promise<void>;
   supabase: SupabaseClient;
+  refreshUser: () => Promise<void>; // ⬅️ Nueva función para refrescar el usuario
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -33,40 +34,110 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const router = useRouter();
+  const pathname = usePathname();
   const supabase = createClient();
 
-  useEffect(() => {
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
-        // Si hay una sesión de Supabase, procedemos a buscar el perfil en nuestra tabla 'users'
-        if (session?.user) {
-          const { data: profile } = await supabase
-            .from('users')
-            .select('*')
-            .eq('id', session.user.id)
-            .single();
+  // Función para cargar el perfil del usuario
+  const loadUserProfile = async (authUser: SupabaseUser): Promise<User | null> => {
+    try {
+      const { data: profile, error } = await supabase
+        .from('users')
+        .select('*')
+        .eq('id', authUser.id)
+        .single();
 
-          // Combinamos la información de la sesión (auth.users) con nuestro perfil (public.users)
-          setUser({ ...session.user, ...profile } as User);
+      if (error) {
+        console.error('Error loading user profile:', error);
+        return null;
+      }
+
+      return { ...authUser, ...profile } as User;
+    } catch (error) {
+      console.error('Exception loading user profile:', error);
+      return null;
+    }
+  };
+
+  // Función para refrescar el usuario
+  const refreshUser = async () => {
+    try {
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      
+      if (authUser) {
+        const fullUser = await loadUserProfile(authUser);
+        setUser(fullUser);
+      } else {
+        setUser(null);
+      }
+    } catch (error) {
+      console.error('Error refreshing user:', error);
+      setUser(null);
+    }
+  };
+
+  // Cargar usuario inicial
+  useEffect(() => {
+    const initializeAuth = async () => {
+      try {
+        // Primero intentamos obtener la sesión actual
+        const { data: { session } } = await supabase.auth.getSession();
+        
+        if (session?.user) {
+          const fullUser = await loadUserProfile(session.user);
+          setUser(fullUser);
         } else {
-          // Si no hay sesión, el usuario es nulo
           setUser(null);
         }
-        // Marcamos la carga como finalizada solo después de haber intentado obtener la sesión y el perfil
+      } catch (error) {
+        console.error('Error initializing auth:', error);
+        setUser(null);
+      } finally {
         setLoading(false);
+      }
+    };
+
+    initializeAuth();
+
+    // Suscribirse a cambios de autenticación
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      async (event, session) => {
+        console.log('Auth state changed:', event);
+
+        if (event === 'SIGNED_IN' && session?.user) {
+          const fullUser = await loadUserProfile(session.user);
+          setUser(fullUser);
+          
+          // Si estamos en login o register, redirigir al dashboard
+          if (pathname === '/login' || pathname === '/register') {
+            router.push('/dashboard');
+            router.refresh();
+          }
+        } else if (event === 'SIGNED_OUT') {
+          setUser(null);
+          router.push('/login');
+          router.refresh();
+        } else if (event === 'TOKEN_REFRESHED' && session?.user) {
+          // Refrescar el perfil cuando se refresca el token
+          const fullUser = await loadUserProfile(session.user);
+          setUser(fullUser);
+        }
       }
     );
 
     return () => {
       subscription.unsubscribe();
     };
-  }, [supabase, router]);
+  }, [supabase, router, pathname]);
 
   const signOut = async () => {
-    await supabase.auth.signOut();
-    // router.refresh() le indica a Next.js que recargue la vista desde el servidor.
-    // El middleware se encargará de redirigir a /login al no encontrar una sesión.
-    router.refresh();
+    try {
+      await supabase.auth.signOut();
+      setUser(null);
+      router.push('/login');
+      router.refresh();
+    } catch (error) {
+      console.error('Error signing out:', error);
+    }
   };
 
   const value = {
@@ -74,10 +145,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     loading,
     signOut,
     supabase,
+    refreshUser,
   };
 
-  // ✅ CORRECCIÓN IMPORTANTE: Devolvemos {children} directamente.
-  // No bloqueamos el renderizado. Los componentes hijos usarán el estado 'loading'
-  // para decidir si muestran un esqueleto de carga o los datos.
+  // NO bloqueamos el renderizado con un loading screen global
+  // Los componentes individuales manejarán su propio estado de carga
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

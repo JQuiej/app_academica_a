@@ -17,9 +17,6 @@ export async function middleware(req: NextRequest) {
           return req.cookies.get(name)?.value
         },
         set(name: string, value: string, options: CookieOptions) {
-          // Si `set` se llama desde un Server Component, se lanzará un error.
-          // El middleware puede ignorar esto de forma segura porque
-          // refrescará las cookies en la respuesta final.
           req.cookies.set({ name, value, ...options })
           res = NextResponse.next({
             request: {
@@ -29,7 +26,6 @@ export async function middleware(req: NextRequest) {
           res.cookies.set({ name, value, ...options })
         },
         remove(name: string, options: CookieOptions) {
-          // Lo mismo que `set`.
           req.cookies.set({ name, value: '', ...options })
           res = NextResponse.next({
             request: {
@@ -42,15 +38,19 @@ export async function middleware(req: NextRequest) {
     }
   )
 
-  // Esta línea es crucial para refrescar la sesión si ha expirado
-  const { data: { session } } = await supabase.auth.getSession()
+  // Refrescar la sesión si ha expirado
+  const { data: { session }, error } = await supabase.auth.getSession()
 
+  // Si hay error al obtener la sesión, intentar refrescarla
+  if (error) {
+    console.error('Error getting session in middleware:', error)
+  }
+
+  // Si estamos en la raíz, redirigir según el estado de sesión
   if (req.nextUrl.pathname === '/') {
     if (session) {
-      // Si hay sesión, llévalo al dashboard
       return NextResponse.redirect(new URL('/dashboard', req.url))
     } else {
-      // Si no hay sesión, llévalo al login
       return NextResponse.redirect(new URL('/login', req.url))
     }
   }
@@ -58,16 +58,22 @@ export async function middleware(req: NextRequest) {
   const protectedPaths = ['/dashboard', '/profile']
   const isProtected = protectedPaths.some(path => req.nextUrl.pathname.startsWith(path))
 
-  // Si el usuario no está autenticado y пытается acceder a una ruta protegida,
-  // redirigirlo a la página de login.
+  // Si no hay sesión y se intenta acceder a ruta protegida
   if (!session && isProtected) {
-    return NextResponse.redirect(new URL('/login', req.url))
+    const redirectUrl = new URL('/login', req.url)
+    // Guardar la URL original para redirigir después del login
+    redirectUrl.searchParams.set('redirectTo', req.nextUrl.pathname)
+    return NextResponse.redirect(redirectUrl)
   }
 
-  // Si el usuario está autenticado y пытается acceder a login o register,
-  // redirigirlo al dashboard.
+  // Si hay sesión y se intenta acceder a login/register
   if (session && (req.nextUrl.pathname === '/login' || req.nextUrl.pathname === '/register')) {
     return NextResponse.redirect(new URL('/dashboard', req.url))
+  }
+
+  // Agregar headers para prevenir caché en rutas protegidas
+  if (isProtected) {
+    res.headers.set('Cache-Control', 'no-store, max-age=0, must-revalidate')
   }
 
   return res
@@ -76,11 +82,12 @@ export async function middleware(req: NextRequest) {
 export const config = {
   matcher: [
     /*
-     * Coincide con todas las rutas de petición excepto las que empiezan por:
+     * Coincide con todas las rutas excepto:
      * - _next/static (archivos estáticos)
      * - _next/image (optimización de imágenes)
-     * - favicon.ico (archivo de favicon)
+     * - favicon.ico, sitemap.xml, robots.txt
+     * - archivos estáticos (*.svg, *.png, etc.)
      */
-    '/((?!_next/static|_next/image|favicon.ico).*)',
+    '/((?!_next/static|_next/image|favicon.ico|sitemap.xml|robots.txt|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
   ],
 }

@@ -8,13 +8,12 @@ import UserProfilePanel from "@/components/ui/UserProfilePanel";
 import { redirect } from "next/navigation";
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
-  const supabase = createClient();
+  const supabase = await createClient(); // ⬅️ Un solo await aquí
 
   // 1. Verificamos la sesión del usuario al inicio del layout.
   const { data: { user } } = await supabase.auth.getUser();
 
-  // Si no hay usuario, el middleware ya debería haber redirigido,
-  // pero esta es una capa extra de seguridad.
+  // Si no hay usuario, redirigir
   if (!user) {
     redirect('/login');
   }
@@ -23,7 +22,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
   const { data: ciclos } = await supabase
     .from("ciclos")
     .select("id, year, period, description")
-    .eq("user_id", user.id) // <-- Filtro de seguridad por usuario
+    .eq("user_id", user.id)
     .order("year", { ascending: false });
 
   return (
@@ -36,7 +35,6 @@ export default async function DashboardLayout({ children }: { children: React.Re
         </div>
         
         <div className="flex-1 overflow-auto py-2">
-          {/* Usamos '|| []' como respaldo si la consulta no devuelve nada */}
           <DashboardNav ciclos={ciclos || []} />
         </div>
 

@@ -11,19 +11,24 @@ export default function UserProfilePanel() {
   const router = useRouter();
 
   const handleLogout = async () => {
-    // La función signOut ahora viene del contexto corregido
+    setIsDropdownOpen(false);
     await signOut();
   };
 
+  // Si está cargando, mostrar skeleton
   if (loading) {
     return (
-      <div className="flex items-center gap-3 animate-pulse">
-        <div className="w-10 h-10 bg-gray-300 rounded-full"></div>
-        <div className="h-4 w-24 bg-gray-300 rounded"></div>
+      <div className="flex items-center gap-3 p-3 animate-pulse">
+        <div className="w-11 h-11 bg-muted rounded-full"></div>
+        <div className="flex-1 min-w-0 space-y-2">
+          <div className="h-4 bg-muted rounded w-24"></div>
+          <div className="h-3 bg-muted rounded w-16"></div>
+        </div>
       </div>
     );
   }
 
+  // Si no hay usuario después de cargar, no mostrar nada
   if (!user) {
     return null;
   }
@@ -76,18 +81,17 @@ export default function UserProfilePanel() {
             </div>
             <div className="p-2">
               <button
-                onClick={() => { router.push('/profile'); setIsDropdownOpen(false); }}
+                onClick={() => { 
+                  setIsDropdownOpen(false);
+                  router.push('/profile'); 
+                }}
                 className="w-full text-left rounded-lg p-2 text-sm text-foreground hover:bg-muted transition-colors"
               >
                 Mi Perfil
               </button>
               <hr className="my-1" />
-              {/* ✅ MEJORA: Se cierra el menú antes de llamar a handleLogout */}
               <button
-                onClick={() => {
-                  setIsDropdownOpen(false);
-                  handleLogout();
-                }}
+                onClick={handleLogout}
                 className="w-full text-left rounded-lg p-2 text-sm text-red-500 hover:bg-red-500/10 transition-colors"
               >
                 Cerrar Sesión

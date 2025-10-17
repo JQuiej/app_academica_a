@@ -1,7 +1,9 @@
 import { createClient } from "@/lib/supabase/server";
 import { DashboardClient } from "./DashboardClient";
 
+// ⬅️ IMPORTANTE: Forzar revalidación
 export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 function procesarDatosDeMaterias(
   materias: any[],
@@ -26,7 +28,6 @@ function procesarDatosDeMaterias(
     const evsDeMateria = evaluacionesPorMateria.get(materia.id) || [];
 
     evsDeMateria.forEach((evaluacion) => {
-      // Solo contamos puntos perdidos de evaluaciones ya calificadas
       if (calificacionesMap.has(evaluacion.id)) {
         const score = calificacionesMap.get(evaluacion.id) || 0;
         puntosGanados += score;
@@ -46,12 +47,9 @@ function procesarDatosDeMaterias(
 export default async function DashboardPage({
   searchParams,
 }: {
-  // 1. CORRECCIÓN: Definimos searchParams como una Promesa
   searchParams: Promise<{ cicloId?: string }>;
 }) {
-  const supabase = createClient();
-
-  // 2. CORRECCIÓN: Usamos 'await' para obtener el objeto de la promesa
+  const supabase = await createClient();
   const resolvedSearchParams = await searchParams;
   
   const { data: { user } } = await supabase.auth.getUser();
@@ -60,9 +58,9 @@ export default async function DashboardPage({
     return <div className="p-8">Inicia sesión para ver tu dashboard.</div>;
   }
 
-  // 3. CORRECCIÓN: Usamos el objeto resuelto
   let cicloIdActivo = resolvedSearchParams?.cicloId;
 
+  // Si no hay ciclo, buscar el más reciente
   if (!cicloIdActivo) {
     const { data: cicloReciente } = await supabase
       .from("ciclos")
@@ -91,11 +89,13 @@ export default async function DashboardPage({
     );
   }
 
+  // ⬅️ CAMBIO: Filtrar por ciclo Y usuario
   const { data: materias, error: materiasError } = await supabase
     .from("materias")
     .select("id, name")
     .eq("ciclo_id", cicloIdActivo)
-    .eq("user_id", user.id);
+    .eq("user_id", user.id)
+    .order("name");
 
   if (materiasError) {
     return <div className="p-8">Error al cargar las materias.</div>;
@@ -106,7 +106,8 @@ export default async function DashboardPage({
   const { data: evaluaciones, error: evError } = await supabase
     .from("evaluaciones")
     .select("id, punteo, materia_id")
-    .in("materia_id", materiaIds);
+    .in("materia_id", materiaIds)
+    .order("date");
 
   if (evError) {
     return <div className="p-8">Error al cargar las evaluaciones.</div>;
